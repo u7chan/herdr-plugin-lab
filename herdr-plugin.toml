@@ -1,0 +1,28 @@
+id = "dev.u7chan.plugin-lab"
+name = "Herdr Plugin Lab"
+version = "0.1.0"
+min_herdr_version = "0.7.0"
+description = "A private playground for learning Herdr plugin development"
+platforms = ["linux", "macos"]
+
+[[actions]]
+id = "hello"
+title = "Plugin Lab: hello"
+description = "Print the runtime context injected by Herdr"
+contexts = ["workspace"]
+command = ["bash", "scripts/hello.sh"]
+
+[[actions]]
+id = "show-welcome"
+title = "🎉 Plugin Labを表示"
+description = "Open the emoji welcome popup"
+contexts = ["workspace"]
+command = ["bash", "scripts/open-welcome.sh"]
+
+[[panes]]
+id = "welcome"
+title = "🎉 Plugin Lab"
+placement = "popup"
+width = 54
+height = 16
+command = ["bash", "scripts/welcome.sh"]
