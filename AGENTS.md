@@ -34,3 +34,9 @@ herdr plugin link "$PWD"
 ```bash
 bash -n scripts/*.sh
 ```
+
+## 設定変更の禁止事項
+
+- `~/.config/herdr/config.toml`など、chezmoi管理（u7chan/workstation-config）下のファイルを直接編集・追記しない。
+- 動作確認はキーバインド登録なしで行う。アクションは`herdr plugin action invoke <plugin>.<action>`で実行できる。
+- キーバインド等の恒久変更が必要な場合はユーザーに相談し、workstation-configリポジトリの`home/dot_config/herdr/config.toml`を修正して`chezmoi apply && herdr server reload-config`で反映する。
