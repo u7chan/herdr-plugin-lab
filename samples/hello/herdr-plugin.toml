@@ -1,8 +1,8 @@
-id = "dev.u7chan.plugin-lab"
-name = "Herdr Plugin Lab"
+id = "dev.u7chan.plugin-lab.hello"
+name = "Herdr Plugin Lab: hello"
 version = "0.1.0"
 min_herdr_version = "0.7.0"
-description = "A private playground for learning Herdr plugin development"
+description = "A basic sample for learning Herdr plugin development"
 platforms = ["linux", "macos"]
 
 [[actions]]
