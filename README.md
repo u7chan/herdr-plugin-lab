@@ -37,4 +37,4 @@ herdr plugin log list --plugin dev.u7chan.plugin-lab.hello --limit 10
 
 - [Plugins - Herdr](https://herdr.dev/docs/plugins/)
 - [CLI reference - Herdr](https://herdr.dev/docs/cli-reference/)
-- [学習記録](docs/learning-log.md)
+- [学習記録](docs/learning-log/)
