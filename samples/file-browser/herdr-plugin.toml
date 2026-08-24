@@ -1,0 +1,12 @@
+id = "dev.u7chan.plugin-lab.file-browser"
+name = "Herdr Plugin Lab: file browser"
+version = "0.1.0"
+min_herdr_version = "0.7.0"
+description = "A small read-only file browser rooted at the focused pane's launch directory"
+platforms = ["linux", "macos"]
+
+[[panes]]
+id = "browser"
+title = "Files"
+placement = "split"
+command = ["python3", "scripts/file_browser.py"]
