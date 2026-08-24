@@ -31,6 +31,17 @@ FOOTER_SEPARATOR = " · "
 MOUSE_DOUBLE_CLICK_INTERVAL_MS = 500
 MOUSE_WHEEL_STEP = 1
 
+# Keep the palette small so it also works with terminals that only expose the classic eight
+# colors.  The selected row uses a dark purple background to blend with Herdr's current-panel
+# color; lower-capability terminals get the closest readable fallback.
+PAIR_DIRECTORY = 1
+PAIR_FILE = 2
+PAIR_FILE_ICON = 3
+PAIR_SELECTED = 4
+PAIR_SELECTED_DIRECTORY = 5
+SELECTED_PANEL_RGB = (30, 30, 46)
+SELECTED_PANEL_FALLBACK_256 = 60  # xterm palette: muted dark purple (#5f5f87)
+
 
 def safe_text(value: str) -> str:
     """Return a single terminal-safe representation of a filesystem-controlled string."""
@@ -199,6 +210,8 @@ class FileBrowser:
         self.status: Optional[str] = self.root_entry.load_error
         self._last_click_at: Optional[float] = None
         self._last_click_row: Optional[int] = None
+        self._colors_enabled = False
+        self._custom_selected_color: Optional[tuple[int, tuple[int, int, int]]] = None
 
     def visible_entries(self) -> list[tuple[FileEntry, int]]:
         """Return visible rows as ``(entry, depth)`` pairs without opening collapsed folders."""
@@ -397,6 +410,80 @@ class FileBrowser:
         return f"{'  ' * depth}{marker} {icon} {_entry_name(entry)}"
 
     @staticmethod
+    def _row_parts(entry: FileEntry, depth: int) -> tuple[str, str, str]:
+        """Return the indentation/marker, icon, and name used to draw one row."""
+
+        if entry.is_dir:
+            marker = "▾" if entry.expanded else "▸"
+            icon = OPEN_FOLDER_ICON if entry.expanded else FOLDER_ICON
+        else:
+            marker = " "
+            icon = FILE_ICON
+        return f"{'  ' * depth}{marker} ", icon, f" {_entry_name(entry)}"
+
+    def _color_pair(self, pair: int) -> int:
+        return curses.color_pair(pair) if self._colors_enabled else 0
+
+    def _restore_custom_selected_color(self) -> None:
+        """Restore a terminal palette slot used for the Herdr-matching highlight."""
+
+        if self._custom_selected_color is None:
+            return
+        color_number, original = self._custom_selected_color
+        try:
+            curses.init_color(color_number, *original)
+        except curses.error:
+            pass
+        self._custom_selected_color = None
+
+    def _setup_colors(self) -> None:
+        """Initialize a restrained palette, falling back to attributes when unavailable."""
+
+        self._colors_enabled = False
+        try:
+            if not curses.has_colors():
+                return
+            curses.start_color()
+            background = curses.COLOR_BLACK
+            try:
+                curses.use_default_colors()
+            except curses.error:
+                # A few terminals report colors but do not support the default-color extension.
+                pass
+            else:
+                background = -1
+            curses.init_pair(PAIR_DIRECTORY, curses.COLOR_YELLOW, background)
+            curses.init_pair(PAIR_FILE, curses.COLOR_WHITE, background)
+            curses.init_pair(PAIR_FILE_ICON, curses.COLOR_WHITE, background)
+            color_count = getattr(curses, "COLORS", 0)
+            selected_foreground = curses.COLOR_WHITE
+            if color_count >= 256:
+                selected_background = SELECTED_PANEL_FALLBACK_256
+                if curses.can_change_color():
+                    # Herdr's current-panel color is #1e1e2e.  Use an otherwise unused palette
+                    # slot when the terminal supports custom colors, then restore it on exit.
+                    color_number = 16
+                    try:
+                        original = curses.color_content(color_number)
+                        rgb = tuple(
+                            round(component * 1000 / 255)
+                            for component in SELECTED_PANEL_RGB
+                        )
+                        curses.init_color(color_number, *rgb)
+                    except curses.error:
+                        pass
+                    else:
+                        self._custom_selected_color = (color_number, original)
+                        selected_background = color_number
+            else:
+                selected_background = curses.COLOR_MAGENTA
+            curses.init_pair(PAIR_SELECTED, selected_foreground, selected_background)
+            curses.init_pair(PAIR_SELECTED_DIRECTORY, curses.COLOR_YELLOW, selected_background)
+        except curses.error:
+            return
+        self._colors_enabled = True
+
+    @staticmethod
     def _add_line(screen: Any, row: int, text: str, width: int, attribute: int = 0) -> None:
         if row < 0 or width <= 0:
             return
@@ -408,6 +495,69 @@ class FileBrowser:
             # frame will redraw it, so this is intentionally harmless.
             pass
 
+    def _draw_row(
+        self,
+        screen: Any,
+        row: int,
+        entry: FileEntry,
+        depth: int,
+        width: int,
+        selected: bool,
+    ) -> None:
+        """Draw a tree row with separate colors for folders, files, and file icons."""
+
+        if width <= 0:
+            return
+
+        if not self._colors_enabled:
+            attribute = curses.A_BOLD if entry.is_dir else 0
+            if selected:
+                attribute |= curses.A_REVERSE
+            self._add_line(screen, row, self.row_text(entry, depth), width, attribute)
+            return
+
+        selected_attribute = self._color_pair(PAIR_SELECTED) | curses.A_BOLD
+        if selected:
+            # Paint the complete row so the selection remains visible after the text ends.
+            try:
+                screen.addnstr(row, 0, " " * width, width, selected_attribute)
+            except curses.error:
+                pass
+            parts = self._row_parts(entry, depth)
+            selected_entry_attribute = (
+                self._color_pair(PAIR_SELECTED_DIRECTORY) | curses.A_BOLD
+                if entry.is_dir
+                else selected_attribute
+            )
+            attribute = selected_entry_attribute
+            icon_attribute = selected_entry_attribute
+        else:
+            prefix, icon, name = self._row_parts(entry, depth)
+            parts = (prefix, icon, name)
+            attribute = self._color_pair(PAIR_DIRECTORY if entry.is_dir else PAIR_FILE)
+            if entry.is_dir:
+                attribute |= curses.A_BOLD
+            icon_attribute = (
+                self._color_pair(PAIR_DIRECTORY)
+                if entry.is_dir
+                else self._color_pair(PAIR_FILE_ICON) | curses.A_BOLD
+            )
+
+        column = 0
+        for index, part in enumerate(parts):
+            remaining = width - column
+            if remaining <= 0:
+                break
+            clipped = clip_text(part, remaining)
+            if not clipped:
+                continue
+            part_attribute = icon_attribute if index == 1 else attribute
+            try:
+                screen.addnstr(row, column, clipped, remaining, part_attribute)
+            except curses.error:
+                pass
+            column += sum(character_width(char) for char in clipped)
+
     def draw(self, screen: Any) -> None:
         """Render the current tree to a curses window."""
 
@@ -416,8 +566,9 @@ class FileBrowser:
         if height <= 0 or width <= 0:
             return
 
-        header = f"{OPEN_FOLDER_ICON} Files: {self.root}"
-        self._add_line(screen, 0, header, width, curses.A_BOLD)
+        # The pane title already says "Files".  Keep only the useful part of the old header: the
+        # current root path, shown quietly as a breadcrumb rather than repeating the title/icon.
+        self._add_line(screen, 0, str(self.root), width, curses.A_DIM)
 
         viewport_height = max(0, height - 2)
         self.ensure_selection_visible(viewport_height)
@@ -426,10 +577,14 @@ class FileBrowser:
             rows[self.scroll_offset : self.scroll_offset + viewport_height], start=1
         ):
             row_index = self.scroll_offset + visible_row - 1
-            attribute = curses.A_BOLD if entry.is_dir else 0
-            if row_index == self.selected_index:
-                attribute |= curses.A_REVERSE
-            self._add_line(screen, visible_row, self.row_text(entry, depth), width, attribute)
+            self._draw_row(
+                screen,
+                visible_row,
+                entry,
+                depth,
+                width,
+                row_index == self.selected_index,
+            )
 
         footer = self.footer_text(self.status, width)
         self._add_line(screen, height - 1, footer, width, curses.A_DIM)
@@ -442,36 +597,40 @@ class FileBrowser:
         """Run the event loop until the user closes the pane."""
 
         screen.keypad(True)
+        self._setup_colors()
         try:
-            mouse_events = (
-                getattr(curses, "BUTTON1_PRESSED", 0)
-                | getattr(curses, "BUTTON4_PRESSED", 0)
-                | getattr(curses, "BUTTON5_PRESSED", 0)
-            )
-            curses.mousemask(mouse_events)
-            # Handle button presses immediately.  Double-click detection is done above so
-            # ncurses does not hold the first press while waiting for the second one.
-            curses.mouseinterval(0)
-        except curses.error:
-            # Keyboard operation remains available when the terminal has no mouse support.
-            pass
-        try:
-            curses.curs_set(0)
-        except curses.error:
-            pass
+            try:
+                mouse_events = (
+                    getattr(curses, "BUTTON1_PRESSED", 0)
+                    | getattr(curses, "BUTTON4_PRESSED", 0)
+                    | getattr(curses, "BUTTON5_PRESSED", 0)
+                )
+                curses.mousemask(mouse_events)
+                # Handle button presses immediately.  Double-click detection is done above so
+                # ncurses does not hold the first press while waiting for the second one.
+                curses.mouseinterval(0)
+            except curses.error:
+                # Keyboard operation remains available when the terminal has no mouse support.
+                pass
+            try:
+                curses.curs_set(0)
+            except curses.error:
+                pass
 
-        while True:
-            height, _ = screen.getmaxyx()
-            self.draw(screen)
-            key = screen.getch()
-            if key == getattr(curses, "KEY_MOUSE", -1):
-                try:
-                    self.handle_mouse(curses.getmouse(), max(1, height - 2))
-                except curses.error:
-                    pass
-                continue
-            if not self.handle_key(key, max(1, height - 2)):
-                return
+            while True:
+                height, _ = screen.getmaxyx()
+                self.draw(screen)
+                key = screen.getch()
+                if key == getattr(curses, "KEY_MOUSE", -1):
+                    try:
+                        self.handle_mouse(curses.getmouse(), max(1, height - 2))
+                    except curses.error:
+                        pass
+                    continue
+                if not self.handle_key(key, max(1, height - 2)):
+                    return
+        finally:
+            self._restore_custom_selected_color()
 
 
 def main() -> int:
