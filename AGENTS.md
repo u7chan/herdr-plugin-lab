@@ -16,15 +16,17 @@ Marketplaceへの公開は目的としない。
 
 ## ローカル開発
 
+サンプルごとに独立したプラグインとして link する。以下は `hello` の例。
+
 ```bash
-herdr plugin link "$PWD"
+herdr plugin link "$PWD/samples/hello"
 ```
 
 通常のソース変更はリンク先へ即時反映される。`herdr-plugin.toml`を変更した場合は再リンクする。
 
 ```bash
-herdr plugin unlink dev.u7chan.plugin-lab
-herdr plugin link "$PWD"
+herdr plugin unlink dev.u7chan.plugin-lab.hello
+herdr plugin link "$PWD/samples/hello"
 ```
 
 `plugin link`は`[[build]]`を実行しない。ビルド工程を追加した場合は、リンク前に手動で実行する。
@@ -32,7 +34,7 @@ herdr plugin link "$PWD"
 シェルスクリプトの構文確認:
 
 ```bash
-bash -n scripts/*.sh
+find samples -type f -path '*/scripts/*.sh' -exec bash -n {} +
 ```
 
 ## 設定変更の禁止事項
