@@ -9,6 +9,7 @@ linkして試します。
 | サンプル | 内容 | 状態 |
 | --- | --- | --- |
 | [`samples/hello`](samples/hello/) | Action、ペイン、実行コンテキストの基本 | 実装済み |
+| [`samples/file-browser`](samples/file-browser/) | 起動ディレクトリ基準の読み取り専用ファイルブラウザ（Issue [#8](https://github.com/u7chan/herdr-plugin-lab/issues/8)） | 実装済み |
 | `samples/safe-close-pane` | 最後のペインを閉じる前の確認（Issue [#3](https://github.com/u7chan/herdr-plugin-lab/issues/3)） | 実装予定 |
 | `samples/copy-cwd` | フォーカス中ペインのパスを Windows クリップボードへコピー（Issue [#4](https://github.com/u7chan/herdr-plugin-lab/issues/4)） | 実装予定 |
 
