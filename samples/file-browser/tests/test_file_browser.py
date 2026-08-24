@@ -115,7 +115,7 @@ class BrowserTests(unittest.TestCase):
             browser.scroll_offset = 1
 
             browser.handle_mouse(
-                (0, 4, 2, 0, file_browser.curses.BUTTON1_CLICKED), viewport_height=3
+                (0, 4, 2, 0, file_browser.curses.BUTTON1_PRESSED), viewport_height=3
             )
 
             self.assertEqual(browser.selected_index, 2)
@@ -129,7 +129,11 @@ class BrowserTests(unittest.TestCase):
             browser = file_browser.FileBrowser(root)
 
             browser.handle_mouse(
-                (0, 2, 1, 0, file_browser.curses.BUTTON1_DOUBLE_CLICKED),
+                (0, 2, 1, 0, file_browser.curses.BUTTON1_PRESSED),
+                viewport_height=3,
+            )
+            browser.handle_mouse(
+                (0, 2, 1, 0, file_browser.curses.BUTTON1_PRESSED),
                 viewport_height=3,
             )
 
@@ -146,11 +150,26 @@ class BrowserTests(unittest.TestCase):
             browser.handle_mouse(
                 (0, 0, 0, 0, file_browser.curses.BUTTON5_PRESSED), viewport_height=3
             )
-            self.assertEqual(browser.selected_index, 3)
+            self.assertEqual(browser.selected_index, file_browser.MOUSE_WHEEL_STEP)
             browser.handle_mouse(
                 (0, 0, 0, 0, file_browser.curses.BUTTON4_PRESSED), viewport_height=3
             )
             self.assertEqual(browser.selected_index, 0)
+
+    def test_footer_controls_keep_a_stable_right_edge(self):
+        width = 80
+        expanded = file_browser.FileBrowser.footer_text(
+            "Expanded samples (2 entries)", width
+        )
+        collapsed = file_browser.FileBrowser.footer_text("Collapsed samples", width)
+        controls = file_browser.FOOTER_CONTROLS
+
+        self.assertTrue(expanded.endswith(controls))
+        self.assertTrue(collapsed.endswith(controls))
+        self.assertEqual(
+            expanded.index(controls),
+            collapsed.index(controls),
+        )
 
     def test_row_text_contains_the_appropriate_nerd_font_icon(self):
         directory = file_browser.FileEntry(Path("folder"), True)

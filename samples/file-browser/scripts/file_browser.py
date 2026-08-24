@@ -12,6 +12,7 @@ import curses
 import json
 import os
 import sys
+import time
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,6 +26,10 @@ OPEN_FOLDER_ICON = "\uf07c"
 FILE_ICON = "\uf15b"
 
 ENTER_KEYS = {10, 13, getattr(curses, "KEY_ENTER", -1)}
+FOOTER_CONTROLS = "↑↓/jk move · PgUp/PgDn scroll · Enter expand/collapse · q/Esc quit"
+FOOTER_SEPARATOR = " · "
+MOUSE_DOUBLE_CLICK_INTERVAL_MS = 500
+MOUSE_WHEEL_STEP = 1
 
 
 def safe_text(value: str) -> str:
@@ -192,6 +197,8 @@ class FileBrowser:
         self.selected_index = 0
         self.scroll_offset = 0
         self.status: Optional[str] = self.root_entry.load_error
+        self._last_click_at: Optional[float] = None
+        self._last_click_row: Optional[int] = None
 
     def visible_entries(self) -> list[tuple[FileEntry, int]]:
         """Return visible rows as ``(entry, depth)`` pairs without opening collapsed folders."""
@@ -303,30 +310,79 @@ class FileBrowser:
         wheel_up = getattr(curses, "BUTTON4_PRESSED", 0)
         wheel_down = getattr(curses, "BUTTON5_PRESSED", 0)
         if wheel_up and button_state & wheel_up:
-            self.move_selection(-3)
+            self._last_click_at = None
+            self._last_click_row = None
+            self.move_selection(-MOUSE_WHEEL_STEP)
             return
         if wheel_down and button_state & wheel_down:
-            self.move_selection(3)
+            self._last_click_at = None
+            self._last_click_row = None
+            self.move_selection(MOUSE_WHEEL_STEP)
             return
 
-        double_click = getattr(curses, "BUTTON1_DOUBLE_CLICKED", 0)
-        single_click = getattr(curses, "BUTTON1_CLICKED", 0) | getattr(
-            curses, "BUTTON1_PRESSED", 0
-        )
-        if not button_state & (double_click | single_click):
+        left_pressed = getattr(curses, "BUTTON1_PRESSED", 0)
+        if not left_pressed or not button_state & left_pressed:
             return
 
         # Row zero is the header.  The viewport starts at row one and excludes the footer.
         visible_row = y - 1
         if visible_row < 0 or visible_row >= max(0, viewport_height):
+            # A click outside the viewport must not become the first half of a later double-click.
+            self._last_click_at = None
+            self._last_click_row = None
             return
         row_index = self.scroll_offset + visible_row
         if row_index >= len(self.visible_entries()):
+            self._last_click_at = None
+            self._last_click_row = None
             return
 
         self.selected_index = row_index
-        if double_click and button_state & double_click:
+        now = time.monotonic()
+        is_double_click = (
+            self._last_click_row == row_index
+            and self._last_click_at is not None
+            and (now - self._last_click_at) * 1000 <= MOUSE_DOUBLE_CLICK_INTERVAL_MS
+        )
+        if is_double_click:
             self.toggle_selected()
+            self._last_click_at = None
+            self._last_click_row = None
+        else:
+            self._last_click_at = now
+            self._last_click_row = row_index
+
+    @staticmethod
+    def footer_text(status: Optional[str], width: int) -> str:
+        """Render the status on the left and keep the operation hints right-aligned."""
+
+        if width <= 0:
+            return ""
+
+        controls_width = sum(character_width(char) for char in FOOTER_CONTROLS)
+        if controls_width >= width:
+            return clip_text(FOOTER_CONTROLS, width)
+
+        if not status:
+            return " " * (width - controls_width) + FOOTER_CONTROLS
+
+        separator_width = sum(character_width(char) for char in FOOTER_SEPARATOR)
+        status_width = width - controls_width - separator_width
+        if status_width <= 0:
+            return " " * (width - controls_width) + FOOTER_CONTROLS
+
+        status_text = clip_text(safe_text(status), status_width)
+        used_width = (
+            sum(character_width(char) for char in status_text)
+            + separator_width
+            + controls_width
+        )
+        return (
+            status_text
+            + FOOTER_SEPARATOR
+            + " " * max(0, width - used_width)
+            + FOOTER_CONTROLS
+        )
 
     @staticmethod
     def row_text(entry: FileEntry, depth: int) -> str:
@@ -375,10 +431,7 @@ class FileBrowser:
                 attribute |= curses.A_REVERSE
             self._add_line(screen, visible_row, self.row_text(entry, depth), width, attribute)
 
-        if self.status:
-            footer = f"{self.status} · ↑↓/jk move · Enter expand/collapse · q/Esc quit"
-        else:
-            footer = "↑↓/jk move · PgUp/PgDn scroll · Enter expand/collapse · q/Esc quit"
+        footer = self.footer_text(self.status, width)
         self._add_line(screen, height - 1, footer, width, curses.A_DIM)
         try:
             screen.refresh()
@@ -390,8 +443,15 @@ class FileBrowser:
 
         screen.keypad(True)
         try:
-            curses.mousemask(curses.ALL_MOUSE_EVENTS)
-            curses.mouseinterval(250)
+            mouse_events = (
+                getattr(curses, "BUTTON1_PRESSED", 0)
+                | getattr(curses, "BUTTON4_PRESSED", 0)
+                | getattr(curses, "BUTTON5_PRESSED", 0)
+            )
+            curses.mousemask(mouse_events)
+            # Handle button presses immediately.  Double-click detection is done above so
+            # ncurses does not hold the first press while waiting for the second one.
+            curses.mouseinterval(0)
         except curses.error:
             # Keyboard operation remains available when the terminal has no mouse support.
             pass
