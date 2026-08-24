@@ -106,6 +106,52 @@ class BrowserTests(unittest.TestCase):
             self.assertEqual(browser.selected_index, 0)
             self.assertEqual(browser.scroll_offset, 0)
 
+    def test_mouse_click_selects_the_clicked_visible_row(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for number in range(5):
+                (root / f"file-{number}.txt").touch()
+            browser = file_browser.FileBrowser(root)
+            browser.scroll_offset = 1
+
+            browser.handle_mouse(
+                (0, 4, 2, 0, file_browser.curses.BUTTON1_CLICKED), viewport_height=3
+            )
+
+            self.assertEqual(browser.selected_index, 2)
+
+    def test_mouse_double_click_toggles_a_folder(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            folder = root / "folder"
+            folder.mkdir()
+            (folder / "deep.txt").touch()
+            browser = file_browser.FileBrowser(root)
+
+            browser.handle_mouse(
+                (0, 2, 1, 0, file_browser.curses.BUTTON1_DOUBLE_CLICKED),
+                viewport_height=3,
+            )
+
+            self.assertTrue(browser.visible_entries()[0][0].expanded)
+            self.assertEqual(browser.visible_entries()[1][0].path.name, "deep.txt")
+
+    def test_mouse_wheel_moves_the_selection(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for number in range(8):
+                (root / f"file-{number}.txt").touch()
+            browser = file_browser.FileBrowser(root)
+
+            browser.handle_mouse(
+                (0, 0, 0, 0, file_browser.curses.BUTTON5_PRESSED), viewport_height=3
+            )
+            self.assertEqual(browser.selected_index, 3)
+            browser.handle_mouse(
+                (0, 0, 0, 0, file_browser.curses.BUTTON4_PRESSED), viewport_height=3
+            )
+            self.assertEqual(browser.selected_index, 0)
+
     def test_row_text_contains_the_appropriate_nerd_font_icon(self):
         directory = file_browser.FileEntry(Path("folder"), True)
         regular_file = file_browser.FileEntry(Path("file.txt"), False)

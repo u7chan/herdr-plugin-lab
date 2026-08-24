@@ -181,7 +181,7 @@ def _entry_sort_key(entry: FileEntry) -> tuple[bool, str, str]:
 
 
 class FileBrowser:
-    """In-memory tree and keyboard state for the curses presenter."""
+    """In-memory tree and input state for the curses presenter."""
 
     def __init__(self, root: os.PathLike[str] | str):
         self.root = Path(root)
@@ -294,6 +294,40 @@ class FileBrowser:
             self.toggle_selected()
         return True
 
+    def handle_mouse(
+        self, mouse_event: tuple[int, int, int, int, int], viewport_height: int
+    ) -> None:
+        """Handle a curses mouse event without performing any filesystem operation."""
+
+        _, _, y, _, button_state = mouse_event
+        wheel_up = getattr(curses, "BUTTON4_PRESSED", 0)
+        wheel_down = getattr(curses, "BUTTON5_PRESSED", 0)
+        if wheel_up and button_state & wheel_up:
+            self.move_selection(-3)
+            return
+        if wheel_down and button_state & wheel_down:
+            self.move_selection(3)
+            return
+
+        double_click = getattr(curses, "BUTTON1_DOUBLE_CLICKED", 0)
+        single_click = getattr(curses, "BUTTON1_CLICKED", 0) | getattr(
+            curses, "BUTTON1_PRESSED", 0
+        )
+        if not button_state & (double_click | single_click):
+            return
+
+        # Row zero is the header.  The viewport starts at row one and excludes the footer.
+        visible_row = y - 1
+        if visible_row < 0 or visible_row >= max(0, viewport_height):
+            return
+        row_index = self.scroll_offset + visible_row
+        if row_index >= len(self.visible_entries()):
+            return
+
+        self.selected_index = row_index
+        if double_click and button_state & double_click:
+            self.toggle_selected()
+
     @staticmethod
     def row_text(entry: FileEntry, depth: int) -> str:
         """Build one display row with an expansion marker, Nerd Font icon, and name."""
@@ -356,6 +390,12 @@ class FileBrowser:
 
         screen.keypad(True)
         try:
+            curses.mousemask(curses.ALL_MOUSE_EVENTS)
+            curses.mouseinterval(250)
+        except curses.error:
+            # Keyboard operation remains available when the terminal has no mouse support.
+            pass
+        try:
             curses.curs_set(0)
         except curses.error:
             pass
@@ -364,6 +404,12 @@ class FileBrowser:
             height, _ = screen.getmaxyx()
             self.draw(screen)
             key = screen.getch()
+            if key == getattr(curses, "KEY_MOUSE", -1):
+                try:
+                    self.handle_mouse(curses.getmouse(), max(1, height - 2))
+                except curses.error:
+                    pass
+                continue
             if not self.handle_key(key, max(1, height - 2)):
                 return
 
